@@ -150,7 +150,8 @@
         background: #344c3b;
         font-size: 11px;
         display: flex;
-        justify-content: space-between;
+        justify-content: center;
+        text-align: center;
         gap: 10px;
     }
     @media (max-width: 650px) {
@@ -159,6 +160,41 @@
         .topbar { padding: 10px 13px; }
         .logo { width: 66px; height: 66px; }
     }
+    #receipt { display: none; }
+    @media print {
+        @page { margin: 12mm; }
+        body * { visibility: hidden !important; }
+        #receipt, #receipt * { visibility: visible !important; }
+        #receipt {
+            display: block !important;
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 72mm;
+            color: #000;
+            background: #fff;
+            font: 12pt "Courier New", monospace;
+        }
+        #receipt h1 { margin: 0 0 8px; text-align: center; font-size: 16pt; }
+        #receipt p { margin: 4px 0; text-align: center; }
+        #receipt .receipt-items { margin: 12px 0; border-top: 1px dashed #000; border-bottom: 1px dashed #000; padding: 8px 0; }
+        #receipt .receipt-item, #receipt .receipt-total { display: flex; justify-content: space-between; gap: 8px; margin: 4px 0; }
+        #receipt .receipt-total { border-top: 1px solid #000; padding-top: 8px; font-weight: bold; font-size: 14pt; }
+    }
+    #receipt-status {
+        width: min(440px, calc(100% - 32px));
+        padding: 22px;
+        color: #172b24;
+        background: #f7f5e9;
+        border: 3px solid #59665b;
+        box-shadow: 5px 5px 0 #8c8b7c;
+        font-family: Tahoma, Verdana, sans-serif;
+    }
+    #receipt-status::backdrop { background: rgb(0 0 0 / 55%); }
+    #receipt-status h2 { margin: 0 0 10px; font-size: 20px; }
+    #receipt-status p { margin: 0 0 18px; line-height: 1.5; }
+    #receipt-status .receipt-actions { display: grid; gap: 9px; }
+    #receipt-status button { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -202,9 +238,10 @@
 
     <footer class="footer">
         <span>CHECKOUT SYSTEM</span>
-        <span>DEMO MODE — NO REAL PAYMENTS</span>
     </footer>
 </div>
+
+<section id="receipt" aria-hidden="true"></section>
 
 <script>
 const database = {
@@ -244,7 +281,7 @@ function addProduct() {
     const code = barcodeInput.value.trim();
 
     if (!validEAN(code)) {
-        showMessage("INVALID BARCODE — CHECK THE NUMBER", "#a32626");
+        showMessage("INVALID BARCODE", "#a32626");
         finishScan();
         return;
     }
@@ -297,6 +334,88 @@ barcodeInput.addEventListener("input", () => {
     }
 });
 
+function askReceiptQuestion(title, message, primaryText, secondaryText) {
+    const dialog = document.getElementById("receipt-status");
+    const titleElement = document.getElementById("receipt-status-title");
+    const messageElement = document.getElementById("receipt-status-message");
+    const primary = document.getElementById("receipt-status-primary");
+    const secondary = document.getElementById("receipt-status-secondary");
+
+    titleElement.textContent = title;
+    messageElement.textContent = message;
+    primary.textContent = primaryText;
+    secondary.textContent = secondaryText;
+
+    return new Promise((resolve) => {
+        primary.onclick = () => { dialog.close(); resolve(true); };
+        secondary.onclick = () => { dialog.close(); resolve(false); };
+        dialog.showModal();
+    });
+}
+
+async function printReceipt(paidTotal) {
+    const receipt = document.getElementById("receipt");
+    receipt.replaceChildren();
+
+    const heading = document.createElement("h1");
+    heading.textContent = "SHOP CHECKOUT";
+    receipt.appendChild(heading);
+
+    const label = document.createElement("p");
+    label.textContent = "CUSTOMER RECEIPT";
+    receipt.appendChild(label);
+
+    const timestamp = document.createElement("p");
+    timestamp.textContent = new Date().toLocaleString();
+    receipt.appendChild(timestamp);
+
+    const items = document.createElement("div");
+    items.className = "receipt-items";
+    products.querySelectorAll(".basket-row").forEach((row) => {
+        const item = document.createElement("div");
+        item.className = "receipt-item";
+        const name = document.createElement("span");
+        name.textContent = row.children[0].textContent;
+        const price = document.createElement("span");
+        price.textContent = row.children[1].textContent;
+        item.append(name, price);
+        items.appendChild(item);
+    });
+    receipt.appendChild(items);
+
+    const totalLine = document.createElement("div");
+    totalLine.className = "receipt-total";
+    const totalLabel = document.createElement("span");
+    totalLabel.textContent = "TOTAL PAID";
+    const totalValue = document.createElement("span");
+    totalValue.textContent = "£" + paidTotal;
+    totalLine.append(totalLabel, totalValue);
+    receipt.appendChild(totalLine);
+
+    const thanks = document.createElement("p");
+    thanks.textContent = "THANK YOU FOR SHOPPING";
+    receipt.appendChild(thanks);
+
+    while (true) {
+        window.print();
+        const printed = await askReceiptQuestion(
+            "Did the receipt print?",
+            "Check whether the paper needs replacing.",
+            "Yes",
+            "No"
+        );
+        if (printed) return;
+
+        const retry = await askReceiptQuestion(
+            "No Printer Connected?",
+            "Connect or check the printer, then retry. Or finish the sale without a receipt.",
+            "Retry printing",
+            "Continue without receipt"
+        );
+        if (!retry) return;
+    }
+}
+
 function resetBasket() {
     total = 0;
     itemCount = 0;
@@ -308,7 +427,7 @@ function resetBasket() {
     barcodeInput.focus();
 }
 
-document.getElementById("pay").addEventListener("click", () => {
+document.getElementById("pay").addEventListener("click", async () => {
     if (total === 0) {
         showMessage("BASKET IS EMPTY — NOTHING TO PAY", "#a32626");
         barcodeInput.focus();
@@ -317,6 +436,9 @@ document.getElementById("pay").addEventListener("click", () => {
 
     const paidTotal = total.toFixed(2);
     alert("SALE COMPLETE\n\nTOTAL PAID: £" + paidTotal);
+    if (confirm("Do you want your receipt?")) {
+        await printReceipt(paidTotal);
+    }
     resetBasket();
 });
 
@@ -327,5 +449,13 @@ document.addEventListener("click", (event) => {
     if (!event.target.closest("button")) barcodeInput.focus();
 });
 </script>
+<dialog id="receipt-status" aria-labelledby="receipt-status-title" aria-describedby="receipt-status-message">
+    <h2 id="receipt-status-title"></h2>
+    <p id="receipt-status-message"></p>
+    <div class="receipt-actions">
+        <button id="receipt-status-primary" type="button"></button>
+        <button id="receipt-status-secondary" type="button"></button>
+    </div>
+</dialog>
 </body>
 </html>
